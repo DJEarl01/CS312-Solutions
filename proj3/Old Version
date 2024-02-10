@@ -1,0 +1,324 @@
+#!/usr/bin/python3
+
+from CS312Graph import *
+import time
+
+
+class NetworkRoutingSolver:
+    def __init__( self):
+        pass
+
+    def initializeNetwork( self, network ):
+        assert( type(network) == CS312Graph )
+        self.network = network
+
+    nodeDistances = [] # Array to keep track of distances between nodes
+    previousTracker = [] # Array to keep track of previous nodes
+    newPreviousTracker = [] # New implementation of the above tracker but flips the variables essentially. 
+    deletedIndexes = [] # Array to keep track of deleted indexes from the priority queue
+    lastHeapNode = 0 # Tracker of the last node in our heap... For some reason this needs to be in the global scope
+    
+    def initializeDistanceArray(self, srcIndex):
+        self.nodeDistances.clear()
+        for i in range(len(self.network.nodes)): # make sure the source node has a distance of 0 in our nodeDistances
+            if (i == srcIndex):
+                self.nodeDistances.append(0)
+            else:
+                self.nodeDistances.append(float('inf'))
+
+    def initializePreviousTrackerArray(self):
+        self.previousTracker.clear()
+        self.deletedIndexes.clear()
+        for i in range(len(self.network.nodes)):
+            self.previousTracker.append(None)
+            self.deletedIndexes.append(0)
+
+    def initializeHeap(self, inputHeap, inputPointerArray):
+        inputHeap.clear()
+        for i in range(len(self.network.nodes)):
+            inputHeap[i] = float('inf')
+            inputPointerArray[i] = i
+        inputHeap[0] = 0
+        inputPointerArray[self.source] = 0
+        inputPointerArray[0] = self.source
+
+    # My Array Priority Queue implementation, which uses a dictionary for key-value pairs
+
+    def insertToArray(self, inputArray, nodeIndex, nodeInitVal):
+        inputArray[nodeIndex] = nodeInitVal
+
+    def decreaseArrayItemKey(self, inputArray, index, newValue):
+        if (index in inputArray):
+            if (inputArray[index] > newValue):
+                inputArray[index] = newValue
+        else:
+            inputArray[index] = newValue
+
+    def deleteMinInArray(self, inputArray):
+        smallestValue = float('inf')
+        smallestKey = -1
+
+        for key in inputArray.keys():
+            if (self.deletedIndexes[key] == 0):
+                if (inputArray[key] < smallestValue):
+                    smallestValue = inputArray[key]
+                    smallestKey = key
+        inputArray.pop(smallestKey)
+        self.deletedIndexes[smallestKey] = 1
+        return smallestKey
+    
+    def arrayIsNotEmpty(self, inputArray):
+        if (len(inputArray) != 0):
+            return True
+        else: 
+            return False
+    
+    # My implementation of the binary heap priority queue
+
+    def bubbleUpBinaryHeap(self, inputHeap, inputPointerArray, targetNodeIndex, heapIndex, value):
+        # This function takes in the working heap, pointer array, the index of the node we are manipulating in the Network, 
+        #       the index it is currently at in the heap, and the value of the node we are manipulating.
+
+        if (heapIndex == 0): # If the heapIndex we get is 0, we can't do any better because this node has no parents
+            return 
+
+        # Next we grab the parent of our current Node
+        if (heapIndex %2 == 1): #if our input index is odd, we need to do a simple floor divide
+            parentIndex = heapIndex//2
+        else: # if it is even, we need to subtract one from the floor divide in order to get the right parent index. 
+            parentIndex = (heapIndex//2) - 1
+        
+        # Now that we have our parent index, we can compare the value of that index with the value of our current Node. 
+        #   If the value of the parent is greater than our input value, then we bubble up.
+        while (inputHeap[parentIndex] > value): # if the parent index has a bigger value than our new value, we need to bubble up. 
+            previousParentItem = inputHeap[parentIndex]
+            inputHeap[parentIndex] = inputHeap[heapIndex]
+            inputHeap[heapIndex] = previousParentItem # this flips the values in the two places.
+
+            # CAN WE SPEED THIS UP? Maybe use the nodeDistances array to get the node itself based on the value
+            keys_list = list(inputPointerArray.keys())
+            values_list = list(inputPointerArray.values())
+            targetKey = values_list.index(parentIndex) # This grabs the target key (Node number) we need to flip the values in our pointer array.
+            previousParentNodeIndex = keys_list[targetKey]
+
+            inputPointerArray[targetNodeIndex] = parentIndex
+            inputPointerArray[previousParentNodeIndex] = heapIndex # this flips the nodes our pointer array. 
+
+            # Now that we've bubbled up one time, we get the parentIndex based on the assumption that we are now the parent of our previous location
+            heapIndex = parentIndex
+            if (heapIndex %2 == 1):
+                parentIndex = heapIndex//2
+            else:
+                parentIndex = (heapIndex//2) - 1
+
+            if (parentIndex < 0): # This is mostly to fix a bug of sorts... If the parentIndex is less than 0, it means we've hit the top, so we break the loop
+                break
+
+    def decreaseHeapItemKey(self, inputHeap, inputPointerArray, lastHeapNode, targetNodeIndex, newValue):
+        # First we get the index of the input targetNodeIndex within our heap tree
+       
+        heapIndex = inputPointerArray[targetNodeIndex]
+
+        # This function should not need to insert anything to our queue since it is already populated to start
+
+        if (newValue > inputHeap[heapIndex]): # If that node already exists in our system, we check to make sure the input is actually less than what we already have
+            return
+        else:
+            inputHeap[heapIndex] = newValue # making our change
+            # Since we've decreased a value in our tree, we may need to bubble up.
+            self.bubbleUpBinaryHeap(inputHeap, inputPointerArray, targetNodeIndex, heapIndex, newValue)
+
+
+    def insertToHeap(self, inputHeap, inputPointerArray, lastHeapNode, newNodeIndex, newValue):
+
+        heapIndex = inputPointerArray[newNodeIndex]
+
+        if (heapIndex == -1): # if that node doesn't exist already in the heap, we can insert the new Node
+            if (self.deletedIndexes[heapIndex] == 0): # If this node hasn't been deleted from our heap before...
+                newLastHeapNode = lastHeapNode + 1 # Since we are adding in a new item, we increase our lastHeapNode counter
+                inputHeap[newLastHeapNode] = newValue # We stick in our new value at the end of our tree. 
+                inputPointerArray[newNodeIndex] = newLastHeapNode # We update our pointer array with the new value
+                self.bubbleUpBinaryHeap(inputHeap, inputPointerArray, newNodeIndex, newLastHeapNode, newValue) # Now that we have a new value, we may need to rebalance our tree using bubble up
+            else:
+                newLastHeapNode = lastHeapNode # If we've already visited the node we are attempting to add, just move on
+        else:
+            newLastHeapNode = lastHeapNode # If the node we are trying to insert already exists, run our decrease Key
+            self.decreaseHeapItemKey(inputHeap, inputPointerArray, newNodeIndex, newValue)
+
+        return newLastHeapNode # We return our Last Heap Node pointer to update it in our system
+
+    def bubbleDownBinaryHeap(self, inputHeap, inputPointerArray, targetNodeIndex, heapIndex, value):
+
+        # We now have it set up where the lowest point in the lowest heap is at the top, and the top has been overwritten
+        #   Now we bubble down until that replacingNode is where it needs to be. 
+
+        leftChildHeapIndex = 1
+        rightChildHeapIndex = 2
+
+        if (leftChildHeapIndex > len(inputHeap)-1): #If we reach the bottom of our tree, we are likely already at the best spot
+            leftChildHeapIndex = len(inputHeap)-1
+        if (rightChildHeapIndex > len(inputHeap)-1):
+            rightChildHeapIndex = len(inputHeap)-1
+
+        # We first grab the children of our current Node
+        if (inputHeap[leftChildHeapIndex] < inputHeap[rightChildHeapIndex]):
+            childHeapIndex = leftChildHeapIndex
+        elif (inputHeap[rightChildHeapIndex] < inputHeap[leftChildHeapIndex]):
+            childHeapIndex = rightChildHeapIndex
+        else: 
+            return
+        
+        # Now that we have our target Child index, we can compare the value of that index with the value of our current Node. 
+        #   If the value of the child is less than our input value, then we bubble down.
+        while (inputHeap[childHeapIndex] < value): # if the child index has a smaller value than our replacement value, we need to bubble down. 
+            previousChildValue = inputHeap[childHeapIndex]
+            inputHeap[childHeapIndex] = value
+            inputHeap[heapIndex] = previousChildValue # Flip the values of the child and the replacing Node
+
+            # CAN WE SPEED THIS UP?
+            values_list = list(inputPointerArray.values())
+            keys_list = list(inputPointerArray.keys())
+            childNodePointerIndex = values_list.index(childHeapIndex)
+            childNode = keys_list[childNodePointerIndex]
+
+            inputPointerArray[childNode] = heapIndex
+            inputPointerArray[targetNodeIndex] = childHeapIndex # this flips the nodes our pointer array. 
+
+            # Now that we've bubbled down one time, we get the next childIndex based on the assumption that we are now the child of our previous location
+            heapIndex = childHeapIndex
+            leftChildHeapIndex = (heapIndex * 2) + 1
+            rightChildHeapIndex = (heapIndex * 2) + 2
+
+            if (leftChildHeapIndex > len(inputHeap)-1): #If we reach the bottom of our tree, we are likely already at the best spot
+                leftChildHeapIndex = len(inputHeap)-1
+            if (rightChildHeapIndex > len(inputHeap)-1):
+                rightChildHeapIndex = len(inputHeap)-1
+
+            if (inputHeap[leftChildHeapIndex] < inputHeap[rightChildHeapIndex]):
+                childHeapIndex = leftChildHeapIndex
+            elif (inputHeap[rightChildHeapIndex] < inputHeap[leftChildHeapIndex]):
+                childHeapIndex = rightChildHeapIndex
+            else: 
+                return
+
+    def deleteMinInHeap(self, inputHeap, inputPointerArray, lastHeapNode):
+        
+        # CAN WE SPEED THIS UP? This runs in O(n)
+        values_list = list(inputPointerArray.values()) 
+        keys_list = list(inputPointerArray.keys())
+        removedNodePointerIndex = values_list.index(0)
+        removedNodeNetworkIndex = keys_list[removedNodePointerIndex]
+        replacingNodePointerIndex = values_list.index(len(inputHeap)-1)
+        replacingNodeNetworkIndex = keys_list[replacingNodePointerIndex]
+
+        replacingNodeValue = inputHeap[len(inputHeap) - 1]
+        inputHeap[0] = replacingNodeValue
+        del inputHeap[len(inputHeap) - 1]
+
+        inputPointerArray[replacingNodeNetworkIndex] = 0
+        del inputPointerArray[removedNodeNetworkIndex]
+        self.deletedIndexes[removedNodeNetworkIndex] = 1
+
+        if (self.heapIsNotEmpty(inputHeap)):
+            self.bubbleDownBinaryHeap(inputHeap, inputPointerArray, replacingNodeNetworkIndex, 0, replacingNodeValue)        
+
+        return removedNodeNetworkIndex
+
+    def heapIsNotEmpty(self, inputHeap):
+        if (len(inputHeap) == 0):
+            return False
+        else:
+            return True
+
+    # My implementation of the path creator function
+
+    def getShortestPath( self, destIndex ):
+        self.dest = destIndex
+
+        if (self.nodeDistances[destIndex] == float('inf')):
+            return {'cost':float('inf'), 'path':[]}
+        
+        path_edges = []
+        total_length = 0
+        currentNodeIndex = destIndex
+
+        while currentNodeIndex != self.source:
+            nextNodeIndex = -1
+
+            nextNodeIndex = self.previousTracker[currentNodeIndex].node_id
+
+            outputSource = self.network.nodes[nextNodeIndex]
+            outputDestination = self.network.nodes[currentNodeIndex]
+            for possibleEdge in outputSource.neighbors:
+                if (possibleEdge.dest.node_id == currentNodeIndex):
+                    outputEdge = possibleEdge
+                    break
+            path_edges.append( (outputSource.loc, outputDestination.loc, '{:.0f}'.format(outputEdge.length)) )
+            
+            currentNodeIndex = nextNodeIndex
+        
+        total_length = self.nodeDistances[destIndex]
+
+        return {'cost':total_length, 'path':path_edges}
+
+    def computeShortestPaths( self, srcIndex, use_heap=False ):
+        self.source = srcIndex
+        
+        self.initializeDistanceArray(srcIndex)
+        self.initializePreviousTrackerArray()
+
+        t1 = time.time()
+        
+        # My Dijkstra's Implementation
+
+        if (use_heap): # Use the Heap Implementation
+            heap = {}
+            pointerArray = {}
+            self.initializeHeap(heap, pointerArray)
+            self.lastHeapNode = 0
+
+            def insert(self, index, value):
+                self.lastHeapNode = self.insertToHeap(heap, pointerArray, self.lastHeapNode, index, value)
+                return
+            def decreaseKey(self, index, value):
+                self.decreaseHeapItemKey(heap, pointerArray, self.lastHeapNode, index, value)
+            def deleteMin(self):
+                return self.deleteMinInHeap(heap, pointerArray, self.lastHeapNode)
+            def isNotEmpty():
+                return self.heapIsNotEmpty(heap)       
+
+        else: # Use the Array Implementation
+            priorityQueue = {} # make a starting priority queue using a dictionary for key-value pairs
+            
+            def insert(self, index, value):
+                self.insertToArray(priorityQueue, index, value)
+
+            insert(self, srcIndex, 0) # initialize our queue with the source node
+
+            def decreaseKey(self, index, value):
+                self.decreaseArrayItemKey(priorityQueue, index, value)
+            def deleteMin(self):
+                return self.deleteMinInArray(priorityQueue)
+            def isNotEmpty():
+                return self.arrayIsNotEmpty(priorityQueue)
+
+        while (isNotEmpty()): # while the priority queue isn't empty
+            targetNodeIndex = deleteMin(self)
+            targetNode = self.network.nodes[targetNodeIndex]
+                
+            for edge in targetNode.neighbors:
+                edgeDestinationIndex = edge.dest.node_id
+                destinationDistanceVal = self.nodeDistances[edgeDestinationIndex]
+                potentialEdgeCost = self.nodeDistances[targetNodeIndex] + edge.length
+                if (potentialEdgeCost < destinationDistanceVal):
+                    # We found a better way to get to the edge index
+                    self.nodeDistances[edgeDestinationIndex] = potentialEdgeCost
+                    self.previousTracker[edgeDestinationIndex] = targetNode
+                    decreaseKey(self, edgeDestinationIndex, potentialEdgeCost)
+
+            # At this point, we have updated all of the node distances we could. 
+        
+        t2 = time.time()
+
+        return (t2-t1)
+
